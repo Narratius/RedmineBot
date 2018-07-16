@@ -7,7 +7,7 @@ uses
   Dialogs, StdCtrls, ExtCtrls, OleCtrls, SHDocVw;
 
 type
-  TRedmineBotFrame = class(TForm)
+  TRedmineBotForm = class(TForm)
     wb: TWebBrowser;
     Panel1: TPanel;
     MemoInfo: TMemo;
@@ -34,9 +34,11 @@ type
     procedure FormCreate(Sender: TObject);
     procedure checkGanttUseMemoClick(Sender: TObject);
     procedure checkUpdateUseMemoClick(Sender: TObject);
+    procedure FormClose(Sender: TObject; var Action: TCloseAction);
   private
     { Private declarations }
     fdone: boolean;
+    f_LogFile: TStream;
   private
     procedure ArrangeTask(aPrevTask, aTask: String);
     procedure GoUrl(AUrl: string);
@@ -58,13 +60,13 @@ type
     procedure upd2(ATask, AUser, ASD, AED: string);
     procedure Login;
     procedure ShowGantt;
-    procedure Log(const St: String);
+    procedure Log(const St: String; ToFile: Boolean = False);
   public
     { Public declarations }
   end;
 
 var
-  RedmineBotFrame: TRedmineBotFrame;
+  RedmineBotForm: TRedmineBotForm;
 
 implementation
 
@@ -74,7 +76,33 @@ Uses
   PassForm,
   ClipBrd, RegularExpressions, DateUtils, Math;
 
-procedure TRedmineBotFrame.GoUrl(AUrl: string);
+ (*
+<select id="time_entry_activity_id" name="time_entry[activity_id]">
+<option value="">--- Выберите ---</option>
+<option value="23">Коммерция</option>
+<option value="8">Обследование</option>
+<option value="25">Орг. вопросы</option>
+<option value="24">Обсуждение</option><option value="9">Разработка</option>
+<option value="12">Проверка СП</option>
+<option value="16">Включение в этал</option>
+<option value="22">Внедрение</option>
+<option value="11">Выезд к клиенту</option>
+<option value="19">Тех-поддержка</option>
+<option value="26">Согласование</option>
+<option value="27">Протокол</option>
+<option value="17">Другое</option>
+<option value="28">ТестированиеММЦ</option>
+<option value="29">ДоработкиММЦ</option>
+<option value="46">Консультации</option>
+<option value="47">Обучение</option></select>
+*)
+
+const
+ actCommerce = '23';
+ actObserve  = '8';
+ actOrgTasks = '25';
+
+procedure TRedmineBotForm.GoUrl(AUrl: string);
 begin
   fdone := false;
   wb.Navigate(AUrl);
@@ -82,12 +110,19 @@ begin
 end;
 
 
-procedure TRedmineBotFrame.Log(const St: String);
+procedure TRedmineBotForm.Log(const St: String; ToFile: Boolean = False);
+var
+ l_B: AnsiString;
 begin
   MemoInfo.Lines.Add(St);
+  if ToFile then
+  begin
+   l_B:= FormatDateTime('dd-mm-yyyy hh:nn:ss:zzz ', Now) + St + #13#10;
+   f_LogFile.Write(l_B[1], Length(l_B));
+  end;
 end;
 
-procedure TRedmineBotFrame.Login;
+procedure TRedmineBotForm.Login;
 var
   sl: TStringList;
   l_FileName, l_Login, l_Password: String;
@@ -113,22 +148,20 @@ begin
 
     sl.LoadFromFile(l_FileName);
     GoUrl('http://ws2.medwork.ru:33380/redmine/login');
-    //GoUrl('http://ws2.medwork.ru:33380/redmine/issues?assigned_to_id=me&set_filter=1');
     wb.OleObject.Document.getElementById('username').value := sl.values['user'];
     wb.OleObject.Document.getElementById('password').value := sl.values['pass'];
-    {if sl.values['pass']<>'' then
-      Submit('');}
+    Log(Format('Вход по именем %s', [sl.values['user']]), True);
   finally
     sl.Free;
   end;
 end;
 
-procedure TRedmineBotFrame.ShowGantt;
+procedure TRedmineBotForm.ShowGantt;
 begin
  GoUrl('http://ws2.medwork.ru:33380/redmine/issues/gantt');
 end;
 
-procedure TRedmineBotFrame.Submit(AFormID: string);
+procedure TRedmineBotForm.Submit(AFormID: string);
 begin
   fdone := false;
   if aformid='' then
@@ -138,7 +171,7 @@ begin
   repeat Application.ProcessMessages until FDone;
 end;
 
-procedure TRedmineBotFrame.ClickByName(AName: string);
+procedure TRedmineBotForm.ClickByName(AName: string);
 var
   v: OleVariant;
 begin
@@ -149,12 +182,23 @@ begin
   repeat Application.ProcessMessages until FDone;
 end;
 
-procedure TRedmineBotFrame.FormCreate(Sender: TObject);
+procedure TRedmineBotForm.FormClose(Sender: TObject; var Action: TCloseAction);
 begin
- wb.Application
+  FreeAndNil(f_LogFile);
 end;
 
-procedure TRedmineBotFrame.UpdateStatus(ATask, AStatus, ANotes: string);
+procedure TRedmineBotForm.FormCreate(Sender: TObject);
+var
+ l_FileName: String;
+ l_Mode: Word;
+begin
+ l_FileName:= ChangeFileExt(Application.ExeName, '.log');
+ l_Mode:= IfThen(FileExists(l_FileName), fmOpenWrite, fmCreate);
+ f_LogFile:= TFileStream.Create(l_FileName, l_Mode or fmShareDenyWrite);
+ f_LogFile.Seek(0, soEnd);
+end;
+
+procedure TRedmineBotForm.UpdateStatus(ATask, AStatus, ANotes: string);
 begin
   GoUrl('http://ws2.medwork.ru:33380/redmine/issues/'+ATask+'/edit');
   wb.OleObject.Document.getElementById('issue_status_id').value := AStatus;
@@ -162,16 +206,19 @@ begin
   submit('issue-form');
 end;
 
-procedure TRedmineBotFrame.UpdateTaskDates(ATask, ASD, AED: string);
+procedure TRedmineBotForm.UpdateTaskDates(ATask, ASD, AED: string);
 begin
   GoUrl('http://ws2.medwork.ru:33380/redmine/issues/'+ATask+'/edit');
   wb.OleObject.Document.getElementById('issue_start_date').value := ASD;
   wb.OleObject.Document.getElementById('issue_due_date').value := AED;
+  wb.OleObject.Document.getElementById('time_entry_hours').Value:= '0.15';
+  wb.OleObject.Document.getElementById('time_entry_comments').value := 'Выравнивание задачи';
+  wb.OleObject.Document.getElementById('time_entry_activity_id').value := '25';
   submit('issue-form');
   Log(ATask + ' done');
 end;
 
-procedure TRedmineBotFrame.UpdateUser(ATask, AUser, AStatus, ANotes: string);
+procedure TRedmineBotForm.UpdateUser(ATask, AUser, AStatus, ANotes: string);
 begin
   GoUrl('http://ws2.medwork.ru:33380/redmine/issues/'+ATask+'/edit');
   wb.OleObject.Document.getElementById('issue_assigned_to_id').value := AUser;
@@ -180,25 +227,25 @@ begin
   submit('issue-form');
 end;
 
-procedure TRedmineBotFrame.ud(ATask, ASD, AED: string);
+procedure TRedmineBotForm.ud(ATask, ASD, AED: string);
 begin
   UpdateTaskDates(aTask, aSD, aED)
 end;
 
-procedure TRedmineBotFrame.upd2(ATask, AUser, ASD, AED: string);
+procedure TRedmineBotForm.upd2(ATask, AUser, ASD, AED: string);
 begin
   GoUrl('http://ws2.medwork.ru:33380/redmine/issues/'+ATask+'/edit');
   wb.OleObject.Document.getElementById('issue_assigned_to_id').value := AUser;
   wb.OleObject.Document.getElementById('issue_start_date').value := ASD;
   wb.OleObject.Document.getElementById('issue_due_date').value := AED;
-  wb.OleObject.Document.getElementById('issue_status_id').value := '2';
+  wb.OleObject.Document.getElementById('issue_status_id').value := '25';
   submit('issue-form');
   Log(ATask + ' done');
 end;
 {issue-form
 GetElementsByTagName
 }
-function TRedmineBotFrame.SetCheckBoxValue(AID: string; ACheckValue: boolean): boolean;
+function TRedmineBotForm.SetCheckBoxValue(AID: string; ACheckValue: boolean): boolean;
 var
   el: variant;
   i: integer;
@@ -234,7 +281,7 @@ begin
         exit;
       end;}
 end;
-procedure TRedmineBotFrame.setparent(id, parent: string);
+procedure TRedmineBotForm.setparent(id, parent: string);
 begin
   GoUrl('http://ws2.medwork.ru:33380/redmine/issues/parent_edit?ids%5B%5D='+id);
   wb.OleObject.Document.getElementById('parent').value := parent;
@@ -242,7 +289,7 @@ begin
   Log(id+#9'done');
 end;
 
-procedure TRedmineBotFrame.CheckActual(ATask: string; AActual: boolean);
+procedure TRedmineBotForm.CheckActual(ATask: string; AActual: boolean);
 var
   el: OleVariant;
 begin
@@ -268,17 +315,17 @@ begin
 //  Log(ATask+#9+vartostr(wb.OleObject.Document.getElementById('issue_custom_field_values_8').checked));
 end;
 
-procedure TRedmineBotFrame.checkUpdateUseMemoClick(Sender: TObject);
+procedure TRedmineBotForm.checkUpdateUseMemoClick(Sender: TObject);
 begin
   btnUpdateTasks.Enabled:= checkUpdateUseMemo.Checked
 end;
 
-procedure TRedmineBotFrame.checkGanttUseMemoClick(Sender: TObject);
+procedure TRedmineBotForm.checkGanttUseMemoClick(Sender: TObject);
 begin
  btnGanttArrange.Enabled:= checkGanttUseMemo.Checked;
 end;
 
-procedure TRedmineBotFrame.addtask(prj,subj,desc,time,categ: string);
+procedure TRedmineBotForm.addtask(prj,subj,desc,time,categ: string);
 begin
   GoUrl('http://ws2.medwork.ru:33380/redmine/projects/'+prj+'/issues/new');
   wb.OleObject.Document.getElementById('issue_subject').value := subj;
@@ -290,7 +337,7 @@ begin
   Log(subj+#9'done');
 end;
 
-procedure TRedmineBotFrame.btnLoadTasksClick(Sender: TObject);
+procedure TRedmineBotForm.btnLoadTasksClick(Sender: TObject);
 var
   l_List: TStrings;
   l_Task: TArray<string>;
@@ -302,7 +349,7 @@ begin
  MemoInfo.Lines.Text:= Clipboard.AsText;
 end;
 
-procedure TRedmineBotFrame.btnUpdateTasksClick(Sender: TObject);
+procedure TRedmineBotForm.btnUpdateTasksClick(Sender: TObject);
 var
   l_Count, i, j: Integer;
   l_RegEx: TRegEx;
@@ -322,7 +369,7 @@ begin
  ShowGantt;
 end;
 
-procedure TRedmineBotFrame.ArrangeTask(aPrevTask, aTask: String);
+procedure TRedmineBotForm.ArrangeTask(aPrevTask, aTask: String);
 var
  l_PDS, l_PDF, l_TDS, l_TDF, l_Time, l_AddTime: String;
  l_DateFinish: TDateTime;
@@ -333,8 +380,8 @@ begin
  GetTaskDates(aPrevTask, l_PDS, l_PDF, l_Time, l_AddTime);
  GetTaskDates(aTask, l_TDS, l_TDF, l_Time, l_AddTime);
 
- Log(aTask);
- Log(Format('From: %s - %s', [l_TDS, l_TDF]));
+ Log(aTask, True);
+ Log(Format('From: %s - %s', [l_TDS, l_TDF]), True);
 
  l_Duration:= Max(StrToIntDef(l_Time, 0) + StrToIntDef(l_AddTime, 0), 8) div 8 + 1;
  l_TDS:= l_PDF;
@@ -346,16 +393,16 @@ begin
   Inc(l_Duration, 2);
  l_DateFinish:= IncDay(l_dateFinish, l_Duration);
  l_TDF:= DateTimeToStr(l_DateFinish, l_DS);
- Log(Format('To:   %s - %s', [l_TDS, l_TDF]));
+ Log(Format('To:   %s - %s', [l_TDS, l_TDF]), True);
  UpdateTaskDates(aTask, l_TDS, l_TDF);
 end;
 
-procedure TRedmineBotFrame.btnAuthClick(Sender: TObject);
+procedure TRedmineBotForm.btnAuthClick(Sender: TObject);
 begin
   Login;
 end;
 
-procedure TRedmineBotFrame.btnGanttArrangeClick(Sender: TObject);
+procedure TRedmineBotForm.btnGanttArrangeClick(Sender: TObject);
 var
  l_Prev, l_Task: String;
  i, l_Count: Integer;
@@ -371,7 +418,7 @@ begin
  end;
 end;
 
-procedure TRedmineBotFrame.btnGanttLoadListClick(Sender: TObject);
+procedure TRedmineBotForm.btnGanttLoadListClick(Sender: TObject);
 begin
  // В буфере обмена должен быть список номеров задач
  MemoInfo.Lines.Clear;
@@ -379,7 +426,7 @@ begin
  btnGanttArrange.Enabled:= MemoInfo.Lines.Count > 1;
 end;
 
-procedure TRedmineBotFrame.MoveTask(ATask, ANewProjectID: string);
+procedure TRedmineBotForm.MoveTask(ATask, ANewProjectID: string);
 begin
   GoUrl('http://ws2.medwork.ru:33380/redmine/issues/'+ATask+'/move');
   wb.OleObject.Document.getElementById('new_project_id').value := ANewProjectID;
@@ -387,7 +434,7 @@ begin
 end;
 
 
-procedure TRedmineBotFrame.GetStatus(ATask: string);
+procedure TRedmineBotForm.GetStatus(ATask: string);
 begin
   GoUrl('http://ws2.medwork.ru:33380/redmine/issues/'+ATask+'/edit');
   Log(ATask+#9+vartostr(wb.OleObject.Document.getElementById('issue_status_id').value));
@@ -395,7 +442,7 @@ end;
 
 
 
-procedure TRedmineBotFrame.GetTaskDates(aTask: String; out aStart, aFinish, aTime, aAddTime: String);
+procedure TRedmineBotForm.GetTaskDates(aTask: String; out aStart, aFinish, aTime, aAddTime: String);
 begin
   GoUrl('http://ws2.medwork.ru:33380/redmine/issues/'+ATask+'/edit');
   aStart:= wb.OleObject.Document.getElementById('issue_start_date').value;
@@ -404,7 +451,7 @@ begin
   aAddTime:= wb.OleObject.Document.getElementById('issue_custom_field_values_20').value;
 end;
 
-procedure TRedmineBotFrame.tt(adate,atask: string; acleartask: boolean; acomment, aactivityid, ahours: string);
+procedure TRedmineBotForm.tt(adate,atask: string; acleartask: boolean; acomment, aactivityid, ahours: string);
 begin
   Log(adate+#9+atask);
   GoUrl('http://ws2.medwork.ru:33380/redmine/issues/'+atask+'/time_entries/new');
@@ -418,18 +465,18 @@ begin
   Log(adate+#9+atask+#9'done');
 end;
 
-procedure TRedmineBotFrame.Button1Click(Sender: TObject);
+procedure TRedmineBotForm.Button1Click(Sender: TObject);
 begin
  ShowGantt;
 end;
 
 
-procedure TRedmineBotFrame.Button2Click(Sender: TObject);
+procedure TRedmineBotForm.Button2Click(Sender: TObject);
 begin
  ArrangeTask('18551', '18064');
 end;
 
-procedure TRedmineBotFrame.wbDocumentComplete(ASender: TObject; const pDisp: IDispatch;
+procedure TRedmineBotForm.wbDocumentComplete(ASender: TObject; const pDisp: IDispatch;
   const URL: OleVariant);
 begin
   fdone := true;

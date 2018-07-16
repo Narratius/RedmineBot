@@ -1,4 +1,4 @@
-object RedmineBotFrame: TRedmineBotFrame
+object RedmineBotForm: TRedmineBotForm
   Left = 0
   Top = 0
   Caption = 'Redmine Assistant'
@@ -11,6 +11,7 @@ object RedmineBotFrame: TRedmineBotFrame
   Font.Name = 'Tahoma'
   Font.Style = []
   OldCreateOrder = False
+  OnClose = FormClose
   OnCreate = FormCreate
   PixelsPerInch = 96
   TextHeight = 13

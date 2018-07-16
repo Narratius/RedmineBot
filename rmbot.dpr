@@ -2,7 +2,7 @@ program rmbot;
 
 uses
   Forms,
-  main in 'main.pas' {RedmineBotFrame},
+  main in 'main.pas' {RedmineBotForm},
   PassForm in 'PassForm.pas' {PasswordForm};
 
 {$R *.res}
@@ -10,7 +10,7 @@ uses
 begin
   Application.Initialize;
   Application.MainFormOnTaskbar := True;
-  Application.CreateForm(TRedmineBotFrame, RedmineBotFrame);
+  Application.CreateForm(TRedmineBotForm, RedmineBotForm);
   Application.CreateForm(TPasswordForm, PasswordForm);
   Application.Run;
 end.
